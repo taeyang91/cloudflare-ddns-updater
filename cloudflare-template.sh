@@ -12,7 +12,19 @@ sitename=""                                         # Title of site "Example Sit
 slackchannel=""                                     # Slack Channel #example
 slackuri=""                                         # URI for Slack WebHook "https://hooks.slack.com/services/xxxxx"
 discorduri=""                                       # URI for Discord WebHook "https://discordapp.com/api/webhooks/xxxxx"
+log_file=""                                         # Configurable log file path (leave empty to log to stdout)
 
+# Logging function
+log_message() {
+    local log_level="$1"
+    local message="$2"
+    local timestamp=$(date +'%Y-%m-%d %H:%M:%S')
+    if [[ -n "$log_file" ]]; then
+        echo "$timestamp [$log_level] $message" >> "$log_file"
+    else
+        echo "$timestamp [$log_level] $message"
+    fi
+}
 
 ###########################################
 ## Check if we have a public IP
@@ -29,7 +41,7 @@ fi
 
 # Use regex to check for proper IPv4 format.
 if [[ ! $ip =~ ^$ipv4_regex$ ]]; then
-    logger -s "DDNS Updater: Failed to find a valid IP."
+    log_message "ERROR" "Failed to find a valid IP."
     exit 2
 fi
 
@@ -46,7 +58,7 @@ fi
 ## Seek for the A record
 ###########################################
 
-logger "DDNS Updater: Check Initiated"
+log_message "INFO" "Check Initiated."
 record=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$zone_identifier/dns_records?type=A&name=$record_name" \
                       -H "X-Auth-Email: $auth_email" \
                       -H "$auth_header $auth_key" \
@@ -56,7 +68,7 @@ record=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$zone_identi
 ## Check if the domain has an A record
 ###########################################
 if [[ $record == *"\"count\":0"* ]]; then
-  logger -s "DDNS Updater: Record does not exist, perhaps create one first? (${ip} for ${record_name})"
+  log_message "ERROR" "Record does not exist, perhaps create one first? (${ip} for ${record_name})"
   exit 1
 fi
 
@@ -66,7 +78,7 @@ fi
 old_ip=$(echo "$record" | sed -E 's/.*"content":"(([0-9]{1,3}\.){3}[0-9]{1,3})".*/\1/')
 # Compare if they're the same
 if [[ $ip == $old_ip ]]; then
-  logger "DDNS Updater: IP ($ip) for ${record_name} has not changed."
+  log_message "INFO" "IP ($ip) for ${record_name} has not changed."
   exit 0
 fi
 
@@ -89,7 +101,7 @@ update=$(curl -s -X PATCH "https://api.cloudflare.com/client/v4/zones/$zone_iden
 ###########################################
 case "$update" in
 *"\"success\":false"*)
-  echo -e "DDNS Updater: $ip $record_name DDNS failed for $record_identifier ($ip). DUMPING RESULTS:\n$update" | logger -s 
+  log_message "ERROR" "$ip $record_name DDNS failed for $record_identifier. DUMPING RESULTS: $update"
   if [[ $slackuri != "" ]]; then
     curl -L -X POST $slackuri \
     --data-raw '{
@@ -105,7 +117,7 @@ case "$update" in
   fi
   exit 1;;
 *)
-  logger "DDNS Updater: $ip $record_name DDNS updated."
+  log_message "INFO" "$ip $record_name DDNS updated."
   if [[ $slackuri != "" ]]; then
     curl -L -X POST $slackuri \
     --data-raw '{
